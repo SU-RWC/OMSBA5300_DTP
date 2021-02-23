@@ -1,0 +1,34 @@
+---
+title: "OMSBA 5300 Data Translation Project"
+author: "Elizabeth, John, Julius, Raymond, Schyuler"
+date: "2/22/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Libraries
+
+```{r}
+library(tidyverse)
+library(jtools)
+library(vtable)
+library(car)
+library(estimatr)
+library(lubridate)
+library(readr)
+library(ggplot2)
+library(ggpubr)
+```
+
+## Import Data
+
+```{r}
+# Set default working directory
+setwd("/Users/cray/Desktop/OMSBA5300")
+
+
+```
+
