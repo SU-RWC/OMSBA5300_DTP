@@ -27,8 +27,12 @@ library(ggpubr)
 
 ```{r}
 # Set default working directory
-setwd("/Users/cray/Desktop/OMSBA5300")
+setwd("/Users/cray/Desktop/OMSBA5300/OMSBA5300_DTP/Data")
 
+if (!require("ipumsr")) stop("Reading IPUMS data into R requires the ipumsr package. It can be installed using the following command: install.packages('ipumsr')")
+
+ddi <- read_ipums_ddi("cps_00001.xml")
+data <- read_ipums_micro(ddi)
 
 ```
 
