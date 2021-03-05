@@ -34,5 +34,10 @@ if (!require("ipumsr")) stop("Reading IPUMS data into R requires the ipumsr pack
 ddi <- read_ipums_ddi("cps_00001.xml")
 data <- read_ipums_micro(ddi)
 
+data <- data %>% 
+  filter(YEAR == 2019 | YEAR == 2020)
+
+vtable(data)
+
 ```
 
