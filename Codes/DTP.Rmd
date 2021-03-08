@@ -31,14 +31,14 @@ setwd("/Users/cray/Desktop/OMSBA5300/OMSBA5300_DTP/Data")
 
 if (!require("ipumsr")) stop("Reading IPUMS data into R requires the ipumsr package. It can be installed using the following command: install.packages('ipumsr')")
 
-ddi <- read_ipums_ddi("cps_00005.xml")
+ddi <- read_ipums_ddi("cps_00006.xml")
 data <- read_ipums_micro(ddi)
 
 data <- data %>% 
   filter(YEAR == 2019 | YEAR == 2020)
 
 
-vtable(data)
+# vtable(data)
 
 ```
 
@@ -70,9 +70,7 @@ df <- data %>%
   select(-ASIAN, -HISPAN, -RACE) %>%
   mutate(Married = ifelse(MARST == 1, 'Yes', 'No')) %>% 
   select(-MARST) %>% 
-  mutate(FoodStamp = ifelse(FOODSTAMP == 1, 'No', 'Yes')) %>% 
-  select(-FOODSTAMP)
-  
+  mutate(FoodStamp = ifelse(FOODSTMP == 1, 'No', 'Yes'))
   
 vtable(df)
 
