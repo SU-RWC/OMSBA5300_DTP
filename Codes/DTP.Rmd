@@ -31,7 +31,7 @@ setwd("/Users/cray/Desktop/OMSBA5300/OMSBA5300_DTP/Data")
 
 if (!require("ipumsr")) stop("Reading IPUMS data into R requires the ipumsr package. It can be installed using the following command: install.packages('ipumsr')")
 
-ddi <- read_ipums_ddi("cps_00003.xml")
+ddi <- read_ipums_ddi("cps_00005.xml")
 data <- read_ipums_micro(ddi)
 
 data <- data %>% 
@@ -47,21 +47,32 @@ vtable(data)
 
 ```{r}
 df <- data %>% 
-  mutate(age_group = case_when(AGE < 20 ~ 'under20',
+  mutate(AgeGroup = case_when(AGE < 20 ~ 'under20',
                                AGE >= 20 | AGE < 30 ~ '20to29',
                                AGE >= 30 | AGE < 40 ~ '30to39',
                                AGE >= 40 | AGE < 50 ~ '40to49',
                                AGE >= 50 | AGE < 60 ~ '50to59',
                                AGE >= 60 ~ 'over60')) %>% 
-  select(-contains('REPWT'), -SERIAL, -AGE) %>% 
-  mutate(regions = case_when(REGION == 11 | REGION == 12 ~ 'Northeast',
+  select(-SERIAL, -AGE) %>% 
+  mutate(Regions = case_when(REGION == 11 | REGION == 12 ~ 'Northeast',
                              REGION == 21 | REGION == 22 ~ 'Midwest',
                              REGION == 31 | REGION == 32 | REGION == 33 ~ 'South',
                              REGION == 41 | REGION == 42 ~ 'West',
-                             REGION == 97 ~ 'Unknow')) %>% 
+                             REGION == 97 ~ 'Unknown')) %>% 
   select(-REGION) %>% 
-  mutate(urban = ifelse(METRO == 2, 'Yes', 'No')) %>% 
-  select(-METRO)
+  mutate(Urban = ifelse(METRO == 2, 'Yes', 'No')) %>% 
+  select(-METRO) %>% 
+  mutate(Race = case_when(HISPAN == 0 & RACE == 100 ~ 'White',
+                          HISPAN == 0 & RACE == 200 ~ 'Black',
+                          HISPAN == 0 & RACE %in% c(650, 651, 652) ~ 'Asian',
+                          HISPAN == 0 & !(RACE %in% c(100, 200, 650, 651, 652)) ~ 'Others',
+                          HISPAN != 0 ~ 'Latino')) %>% 
+  select(-ASIAN, -HISPAN, -RACE) %>%
+  mutate(Married = ifelse(MARST == 1, 'Yes', 'No')) %>% 
+  select(-MARST) %>% 
+  mutate(FoodStamp = ifelse(FOODSTAMP == 1, 'No', 'Yes')) %>% 
+  select(-FOODSTAMP)
+  
   
 vtable(df)
 
