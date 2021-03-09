@@ -115,7 +115,12 @@ df <- class_converted %>%
                                EDUC == 124 ~ 'Professional Degree',
                                EDUC == 125 ~ 'Doctorate Degree',
                                EDUC %in% c(0, 1, 2, 999) ~ 'NA')) %>% 
-  select(-EDUC)
+  select(-EDUC) %>% 
+  mutate(Employed = case_when(EMPSTAT <= 01 | EMPSTAT >= 30 ~ 'Others', # NIU/armedforces
+                               EMPSTAT >= 10 &  EMPSTAT < 20 ~ 'Yes',
+                               EMPSTAT >= 20 &  EMPSTAT < 30 ~ 'No'
+                               )) %>% 
+  select(-EMPSTAT)
   
 vtable(df)
 
