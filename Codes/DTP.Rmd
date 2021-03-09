@@ -34,9 +34,23 @@ if (!require("ipumsr")) stop("Reading IPUMS data into R requires the ipumsr pack
 ddi <- read_ipums_ddi("cps_00006.xml")
 data <- read_ipums_micro(ddi)
 
-data <- data %>% 
-  filter(YEAR == 2019 | YEAR == 2020)
+StateCode <- read_csv('State_FIPS.csv')
 
+StateCode <- StateCode %>% 
+  select(State, STATEFIP)
+
+Industries <- read_csv('indnames.csv')
+
+Industries <- Industries %>%
+  mutate(Industry = indname, IND = ind) %>%
+  select(-indname, -ind) %>% 
+  filter(Industry %in% c('Construction',
+                         'Manufacturing', 
+                         'Retail Trade', 
+                         'Information', 
+                         'Finance and Insurance, and Real Estate and Rental and Leasing',
+                         'Arts, Entertainment, and Recreation, and Accommodation and Food Services'))
+  
 
 # vtable(data)
 
@@ -46,7 +60,21 @@ data <- data %>%
 ## Data Cleaning
 
 ```{r}
-df <- data %>% 
+class_converted <- data %>%
+  mutate(Month = as_factor(lbl_clean(MONTH)),
+         ASECFlag = as_factor(lbl_clean(ASECFLAG)),
+         FoodStampRecipient = as_factor(lbl_clean(FOODSTMP)),
+         Sex = as_factor(lbl_clean(SEX)),
+         LaborForce = as_factor(lbl_clean(LABFORCE)),
+         COVIDTelework = as_factor(lbl_clean(COVIDTELEW)),###### has NIU
+         COVIDUnableToWork = as_factor(lbl_clean(COVIDUNAW)),###### has NIU
+         COVIDUnableToLookForWork = as_factor(lbl_clean(COVIDLOOK)),###### has NIU
+         FamilyIncome = as_factor(lbl_clean(FAMINC)),
+         Occupation = as_factor(lbl_clean(OCC))
+         ) %>% 
+  select(-c(MONTH, ASECFLAG, FOODSTMP, SEX, COVIDTELEW, COVIDUNAW, COVIDLOOK, FAMINC, OCC, LABFORCE))
+
+df <- class_converted %>% 
   mutate(AgeGroup = case_when(AGE < 20 ~ 'under20',
                                AGE >= 20 | AGE < 30 ~ '20to29',
                                AGE >= 30 | AGE < 40 ~ '30to39',
@@ -60,7 +88,10 @@ df <- data %>%
                              REGION == 41 | REGION == 42 ~ 'West',
                              REGION == 97 ~ 'Unknown')) %>% 
   select(-REGION) %>% 
-  mutate(Urban = ifelse(METRO == 2, 'Yes', 'No')) %>% 
+  mutate(MetroArea = case_when(METRO %in% c(0, 4, 9) ~ 'Others',
+                               METRO == 1 ~ 'Rural',
+                               METRO == 2 ~ 'Urban',
+                               METRO == 3 ~ 'Suburb')) %>% 
   select(-METRO) %>% 
   mutate(Race = case_when(HISPAN == 0 & RACE == 100 ~ 'White',
                           HISPAN == 0 & RACE == 200 ~ 'Black',
@@ -70,7 +101,21 @@ df <- data %>%
   select(-ASIAN, -HISPAN, -RACE) %>%
   mutate(Married = ifelse(MARST == 1, 'Yes', 'No')) %>% 
   select(-MARST) %>% 
-  mutate(FoodStamp = ifelse(FOODSTMP == 1, 'No', 'Yes'))
+  left_join(StateCode, by = 'STATEFIP') %>% 
+  select(-STATEFIP) %>% 
+  inner_join(Industries, by = 'IND') %>% 
+  select(-IND) %>% 
+  mutate(Education = case_when(EDUC >= 10 & EDUC <= 72 ~ 'Up to Grade 12',
+                               EDUC == 73 ~ 'High School Diploma',
+                               EDUC %in% c(80, 81, 90, 100, 110, 120, 121, 122) ~ 'Some College No Degree',
+                               EDUC == 91 ~ 'Vocational Degree',
+                               EDUC == 92 ~ 'Associates Degree',
+                               EDUC == 111 ~ 'Bachelor Degree',
+                               EDUC == 123 ~ 'Master Degree',
+                               EDUC == 124 ~ 'Professional Degree',
+                               EDUC == 125 ~ 'Doctorate Degree',
+                               EDUC %in% c(0, 1, 2, 999) ~ 'NA')) %>% 
+  select(-EDUC)
   
 vtable(df)
 
