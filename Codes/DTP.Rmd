@@ -41,6 +41,8 @@ StateCode <- StateCode %>%
 
 Industries <- read_csv('indnames.csv')
 
+Occupations <- read_csv('Occupation.csv')
+
 Industries <- Industries %>%
   mutate(Industry = indname, IND = ind) %>%
   select(-indname, -ind) %>% 
@@ -69,10 +71,9 @@ class_converted <- data %>%
          COVIDTelework = as_factor(lbl_clean(COVIDTELEW)),###### has NIU
          COVIDUnableToWork = as_factor(lbl_clean(COVIDUNAW)),###### has NIU
          COVIDUnableToLookForWork = as_factor(lbl_clean(COVIDLOOK)),###### has NIU
-         FamilyIncome = as_factor(lbl_clean(FAMINC)),
-         Occupation = as_factor(lbl_clean(OCC))
+         FamilyIncome = as_factor(lbl_clean(FAMINC))
          ) %>% 
-  select(-c(MONTH, ASECFLAG, FOODSTMP, SEX, COVIDTELEW, COVIDUNAW, COVIDLOOK, FAMINC, OCC, LABFORCE))
+  select(-c(MONTH, ASECFLAG, FOODSTMP, SEX, COVIDTELEW, COVIDUNAW, COVIDLOOK, FAMINC, LABFORCE))
 
 df <- class_converted %>% 
   mutate(AgeGroup = case_when(AGE < 20 ~ 'under20',
@@ -134,7 +135,13 @@ df <- class_converted %>%
                                     WHYPTLWK == 101 ~ 'Health Limitation',
                                     WHYPTLWK == 121 ~ 'Childcare Problem',
                                     WHYPTLWK == 122 ~ 'Other Personal Obligations')) %>% 
-  select(-WHYPTLWK)
+  select(-WHYPTLWK) %>% 
+  left_join(Occupations, by = 'OCC') %>% 
+  select(-OCC)
+
+## convert new variables to factors 
+df <- df %>% 
+  mutate_if(is.character, as.factor)
   
 vtable(df)
 
