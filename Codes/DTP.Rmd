@@ -27,7 +27,7 @@ library(ggpubr)
 
 ```{r}
 # Set default working directory
-setwd("/Users/cray/Desktop/OMSBA5300/OMSBA5300_DTP/Data")
+setwd('/Users/cray/Desktop/OMSBA5300/OMSBA5300_DTP/Data')
 
 if (!require("ipumsr")) stop("Reading IPUMS data into R requires the ipumsr package. It can be installed using the following command: install.packages('ipumsr')")
 
@@ -63,8 +63,7 @@ Industries <- Industries %>%
 
 ```{r}
 class_converted <- data %>%
-  mutate(Month = as_factor(lbl_clean(MONTH)),
-         ASECFlag = as_factor(lbl_clean(ASECFLAG)),
+  mutate(ASECFlag = as_factor(lbl_clean(ASECFLAG)),
          FoodStampRecipient = as_factor(lbl_clean(FOODSTMP)),
          Sex = as_factor(lbl_clean(SEX)),
          LaborForce = as_factor(lbl_clean(LABFORCE)),
@@ -73,7 +72,7 @@ class_converted <- data %>%
          COVIDUnableToLookForWork = as_factor(lbl_clean(COVIDLOOK)),###### has NIU
          FamilyIncome = as_factor(lbl_clean(FAMINC))
          ) %>% 
-  select(-c(MONTH, ASECFLAG, FOODSTMP, SEX, COVIDTELEW, COVIDUNAW, COVIDLOOK, FAMINC, LABFORCE))
+  select(-c(ASECFLAG, FOODSTMP, SEX, COVIDTELEW, COVIDUNAW, COVIDLOOK, FAMINC, LABFORCE))
 
 df <- class_converted %>% 
   mutate(AgeGroup = case_when(AGE < 20 ~ 'under20',
@@ -137,7 +136,8 @@ df <- class_converted %>%
                                     WHYPTLWK == 122 ~ 'Other Personal Obligations')) %>% 
   select(-WHYPTLWK) %>% 
   left_join(Occupations, by = 'OCC') %>% 
-  select(-OCC)
+  select(-OCC) %>% 
+  filter(Employed != 'Others')
 
 ## convert new variables to factors 
 df <- df %>% 
@@ -147,4 +147,50 @@ vtable(df)
 
 ```
 
+
+## Data Exploration
+
+```{r}
+## Unemployment Rate by Industries
+unemp_ind <- df %>% 
+  group_by(Industry, YEAR) %>% 
+  summarise(AvgUnempRate = length(which(Employed == 'No')) / (length(which(Employed == 'No')) + length(which(Employed == 'Yes')))) %>% 
+  mutate(Diff = AvgUnempRate - lag(AvgUnempRate))
+
+unemp_ind$YEAR <- as.factor(unemp_ind$YEAR)
+
+ggplot(data = unemp_ind, aes(x = Industry, y = AvgUnempRate, fill = YEAR)) +
+  geom_bar(stat = 'identity', position = position_dodge()) +
+  scale_y_continuous(labels = scales::percent) +
+  ylab('Average Unemployment Rate') +
+  coord_flip() +
+  theme_bw()
+
+unemp_ind_2020 <- df %>% 
+  filter(YEAR == 2020) %>% 
+  group_by(Industry, MONTH) %>% 
+  summarise(AvgUnempRate = length(which(Employed == 'No')) / (length(which(Employed == 'No')) + length(which(Employed == 'Yes')))) %>% 
+  mutate(Diff = AvgUnempRate - lag(AvgUnempRate))
+
+ggplot(data = unemp_ind_2020, aes(x = MONTH, y = AvgUnempRate, color = Industry, shape = Industry)) +
+  geom_point() +
+  geom_smooth(method = 'loess', se = FALSE) +
+  xlim('1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12') +
+  scale_y_continuous(labels = scales::percent) +
+  ylab('Average Unemployment Rate') +
+  xlab('Month') +
+  theme_bw()
+
+df_2019 <- df %>% 
+  filter(YEAR == 2019)
+
+df_2020 <- df %>% 
+  filter(YEAR == 2020)
+
+m19 <- glm(Employed ~ Industry, data = df_2019, family = binomial('probit'))
+m20 <- glm(Employed ~ Industry, data = df_2020, family = binomial('probit'))
+
+export_summs(m19, m20)
+
+```
 
