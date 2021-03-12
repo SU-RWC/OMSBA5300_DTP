@@ -46,12 +46,14 @@ Occupations <- read_csv('Occupation.csv')
 Industries <- Industries %>%
   mutate(Industry = indname, IND = ind) %>%
   select(-indname, -ind) %>% 
-  filter(Industry %in% c('Construction',
-                         'Manufacturing', 
+  filter(Industry %in% c('Manufacturing', 
                          'Retail Trade', 
-                         'Information', 
-                         'Finance and Insurance, and Real Estate and Rental and Leasing',
-                         'Arts, Entertainment, and Recreation, and Accommodation and Food Services'))
+                         'Information',
+                         'Arts, Entertainment, and Recreation, and Accommodation and Food Services')) %>% 
+  mutate(Industry = case_when(Industry == 'Retail Trade' ~ 'Retail',
+                              Industry == 'Manufacturing' ~ 'Manufacturing',
+                              Industry == 'Information' ~ 'Information',
+                              Industry == 'Arts, Entertainment, and Recreation, and Accommodation and Food Services' ~ 'Arts, Leisure and Hospitality'))
   
 
 # vtable(data)
@@ -187,10 +189,10 @@ df_2019 <- df %>%
 df_2020 <- df %>% 
   filter(YEAR == 2020)
 
-m19 <- glm(Employed ~ Industry, data = df_2019, family = binomial('probit'))
-m20 <- glm(Employed ~ Industry, data = df_2020, family = binomial('probit'))
+##m19 <- glm(Employed ~ Industry, data = df_2019, family = binomial('probit'))
+##m20 <- glm(Employed ~ Industry, data = df_2020, family = binomial('probit'))
 
-export_summs(m19, m20)
+##export_summs(m19, m20)
 
 ```
 
