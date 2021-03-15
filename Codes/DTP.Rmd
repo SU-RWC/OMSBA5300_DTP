@@ -108,16 +108,12 @@ df <- class_converted %>%
   select(-STATEFIP) %>% 
   inner_join(Industries, by = 'IND') %>% 
   select(-IND) %>% 
-  mutate(Education = case_when(EDUC >= 10 & EDUC <= 72 ~ 'Up to Grade 12',
-                               EDUC == 73 ~ 'High School Diploma',
-                               EDUC %in% c(80, 81, 90, 100, 110, 120, 121, 122) ~ 'Some College No Degree',
-                               EDUC == 91 ~ 'Vocational Degree',
-                               EDUC == 92 ~ 'Associates Degree',
-                               EDUC == 111 ~ 'Bachelor Degree',
-                               EDUC == 123 ~ 'Master Degree',
-                               EDUC == 124 ~ 'Professional Degree',
-                               EDUC == 125 ~ 'Doctorate Degree',
-                               EDUC %in% c(0, 1, 2, 999) ~ 'NA')) %>% 
+  mutate(Education = case_when(EDUC >= 10 & EDUC <= 72 ~ 'NoHighschool',
+                               EDUC == 73 ~ 'HighschoolNoCollege',
+                               EDUC %in% c(80, 81, 90, 100, 110, 120, 121, 122, 91, 92) ~ 'SomeCollegeAssociateDegree',
+                               EDUC == 111 ~ 'BachelorDegree',
+                               EDUC %in% c(123,124,125) ~ 'GraduateDegreeOrHigher',
+                               EDUC %in% c(0, 1, 2, 999) ~ 'NA')) %>%  
   select(-EDUC) %>% 
   filter(Education != 'NA') %>% 
   mutate(Employed = case_when(EMPSTAT <= 1 | EMPSTAT >= 30 ~ 'Others', 
@@ -138,15 +134,11 @@ df <- class_converted %>%
                                     WHYPTLWK == 101 ~ 'Health Limitation',
                                     WHYPTLWK == 121 ~ 'Childcare Problem',
                                     WHYPTLWK == 122 ~ 'Other Personal Obligations')) %>% 
-  select(-WHYPTLWK) %>% 
-  left_join(Occupations, by = 'OCC') %>% 
-  select(-OCC) %>% 
+  select(-WHYPTLWK, -OCC) %>% 
   filter(Employed != 'Others') %>% 
-  filter(!is.na(WTFINL))
+  filter(!is.na(WTFINL)) #check with Schyuler
 
 df$Employed <- as.numeric(df$Employed)
-
-df <- dummy_cols(df, select_columns = 'Race')
   
 vtable(df)
 
@@ -281,10 +273,10 @@ ggplot(data = EduInd_2020, aes(x = Education, y = AvgUnempRate, fill = Industry)
   coord_flip() +
   theme(axis.text.x = element_text(angle = 0))
 
-##m19 <- glm(Employed ~ Industry, data = df_2019, family = binomial('probit'))
-##m20 <- glm(Employed ~ Industry, data = df_2020, family = binomial('probit'))
+m19 <- glm(Employed ~ Industry, data = df_2019, family = binomial('probit'), weights = WTFINL)
+m20 <- glm(Employed ~ Industry, data = df_2020, family = binomial('probit'), weights = WTFINL)
 
-##export_summs(m19, m20)
+export_summs(m19, m20)
 
 ```
 
