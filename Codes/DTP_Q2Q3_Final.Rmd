@@ -1,0 +1,1245 @@
+---
+title: "OMSBA 5300 Data Translation Project"
+author: "Elizabeth, John, Julius, Raymond, Schyuler"
+date: "2/22/2021"
+output: html_document
+---
+
+```{r setup, echo=FALSE, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r echo = FALSE, message=FALSE, warning=FALSE}
+# Clear environment of variables and functions
+rm(list = ls(all = TRUE)) 
+# Clear environment of packages
+if(is.null(sessionInfo()$otherPkgs) == FALSE)lapply(paste("package:", names(sessionInfo()$otherPkgs), sep=""), detach, character.only = TRUE, unload = TRUE)
+```
+
+
+## Libraries and set themes
+
+```{r, message= FALSE, warning=FALSE, echo=FALSE, include=FALSE}
+library(tidyverse)
+library(jtools)
+library(vtable)
+library(car)
+library(estimatr)
+library(lubridate)
+library(readr)
+library(ggplot2)
+library(ggpubr)
+library(fastDummies)
+library(viridis)
+library(gridExtra)
+library(cowplot)
+# Set themes
+theme_clean <- function(x) {
+  #theme_minimal() + 
+  theme(panel.border = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(color = "gray"),
+        axis.ticks.y = element_blank(),
+        axis.ticks.x = element_blank(),
+        plot.title = element_text(color = "gray29", size = 11, face = "plain"),
+        plot.subtitle = element_text(color = "gray29", size = 9, face = "plain"),
+        axis.text.x = element_text(color = "#595959", size = 6.5),
+        axis.text.y = element_text(color = "#595959", size = 8),
+        axis.title = element_text(color = "#595959", size = 10, face = "plain"),
+        legend.title = element_text(color = "#595959", size = 10, face = "plain"),
+        legend.text = element_text(color = "#595959", size = 10, face = "plain"),
+        strip.background = element_rect(colour="White", fill="White")
+        )
+}
+```
+
+## Import Data
+
+```{r, message = FALSE, warning=FALSE, echo=FALSE}
+# Set default working directory
+setwd('/Users/cray/Desktop/OMSBA5300/OMSBA5300_DTP/Data')
+if (!require("ipumsr")) stop("Reading IPUMS data into R requires the ipumsr package. It can be installed using the following command: install.packages('ipumsr')")
+ddi <- read_ipums_ddi("cps_00006.xml")
+data <- read_ipums_micro(ddi)
+StateCode <- read_csv('State_FIPS.csv')
+StateCode <- StateCode %>% 
+  select(State, STATEFIP)
+Industries <- read_csv('indnames.csv')
+Industries <- Industries %>%
+  mutate(Industry = indname, IND = ind) %>%
+  select(-indname, -ind) %>% 
+  filter(Industry %in% c('Manufacturing', 
+                         'Retail Trade', 
+                         'Information',
+                         'Arts, Entertainment, and Recreation, and Accommodation and Food Services')) %>% 
+  mutate(Industry = case_when(Industry == 'Retail Trade' ~ 'Retail',
+                              Industry == 'Manufacturing' ~ 'Manufacturing',
+                              Industry == 'Information' ~ 'Information',
+                              Industry == 'Arts, Entertainment, and Recreation, and Accommodation and Food Services' ~ 'Arts, Leisure and Hospitality'))
+  
+# vtable(data)
+```
+
+
+## Data Cleaning
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE, include=FALSE}
+class_converted <- data %>%
+  mutate(ASECFlag = as_factor(lbl_clean(ASECFLAG)),
+         FoodStampRecipient = as_factor(lbl_clean(FOODSTMP)),
+         Gender = as_factor(lbl_clean(SEX)),
+         LaborForce = as_factor(lbl_clean(LABFORCE)),
+         COVIDTelework = as_factor(lbl_clean(COVIDTELEW)),
+         COVIDUnableToWork = as_factor(lbl_clean(COVIDUNAW)),
+         COVIDUnableToLookForWork = as_factor(lbl_clean(COVIDLOOK)),
+         FamilyIncome = as_factor(lbl_clean(FAMINC))
+         ) %>% 
+  select(-c(ASECFLAG, FOODSTMP, SEX, COVIDTELEW, COVIDUNAW, COVIDLOOK, FAMINC, LABFORCE))
+df <- class_converted %>% 
+  select(-SERIAL) %>% 
+  mutate(AgeGroup = case_when(AGE < 20 ~ 'under20',
+                               AGE >= 20 & AGE < 30 ~ '20to29',
+                               AGE >= 30 & AGE < 40 ~ '30to39',
+                               AGE >= 40 & AGE < 50 ~ '40to49',
+                               AGE >= 50 & AGE < 60 ~ '50to59',
+                               AGE >= 60 ~ 'over60')) %>% 
+  mutate(Regions = case_when(REGION == 11 | REGION == 12 ~ 'Northeast',
+                             REGION == 21 | REGION == 22 ~ 'Midwest',
+                             REGION == 31 | REGION == 32 | REGION == 33 ~ 'South',
+                             REGION == 41 | REGION == 42 ~ 'West',
+                             REGION == 97 ~ 'Unknown')) %>% 
+  select(-REGION) %>% 
+  mutate(MetroArea = case_when(METRO %in% c(0, 4, 9) ~ 'Others',
+                               METRO == 1 ~ 'Rural',
+                               METRO == 2 ~ 'Urban',
+                               METRO == 3 ~ 'Suburb')) %>% 
+  select(-METRO) %>% 
+  mutate(Race = case_when(HISPAN == 0 & RACE == 100 ~ 'White',
+                          HISPAN == 0 & RACE == 200 ~ 'Black',
+                          HISPAN == 0 & RACE %in% c(650, 651, 652) ~ 'Asian',
+                          HISPAN == 0 & !(RACE %in% c(100, 200, 650, 651, 652)) ~ 'MixedRace',
+                          HISPAN != 0 ~ 'Latino')) %>% 
+  select(-ASIAN, -HISPAN, -RACE) %>%
+  mutate(Married = ifelse(MARST == 1, 1, 0)) %>% 
+  select(-MARST) %>% 
+  left_join(StateCode, by = 'STATEFIP') %>% 
+  select(-STATEFIP) %>% 
+  inner_join(Industries, by = 'IND') %>% 
+  select(-IND) %>% 
+  mutate(Education = case_when(EDUC >= 10 & EDUC <= 72 ~ 'NoHighschool',
+                               EDUC == 73 ~ 'HighschoolNoCollege',
+                               EDUC %in% c(80, 81, 90, 100, 110, 120, 121, 122, 91, 92) ~ 'SomeCollegeAssociateDegree',
+                               EDUC == 111 ~ 'BachelorDegree',
+                               EDUC %in% c(123,124,125) ~ 'GraduateDegreeOrHigher',
+                               EDUC %in% c(0, 1, 2, 999) ~ 'NA')) %>%  
+  select(-EDUC) %>% 
+  filter(Education != 'NA') %>% 
+  mutate(Employed = case_when(EMPSTAT <= 1 | EMPSTAT >= 30 ~ 'Others', 
+                               EMPSTAT >= 10 &  EMPSTAT < 20 ~ '1',
+                               EMPSTAT >= 20 &  EMPSTAT < 30 ~ '0'
+                               )) %>% 
+  select(-EMPSTAT) %>%
+  mutate(WorkStatus = case_when(WKSTAT %in% c(10,11,14,15) ~ 'Full Time',
+                                 WKSTAT %in% c(12,20,21,22,40,41) ~ 'Part Time',
+                                 WKSTAT %in% c(13,42,50,60) ~ 'Unemployed',
+                                 WKSTAT == 99 ~ 'NA' )) %>% 
+  select(-WKSTAT) %>% 
+  mutate(UnemploymentReason = ifelse(WHYUNEMP==1, 'Layoff', 'Other')) %>% 
+  select(-WHYUNEMP) %>% 
+  mutate(PartTimeReason = case_when(!(WHYPTLWK %in% c(52, 60, 101, 121, 122)) ~ 'Others',
+                                    WHYPTLWK == 52 ~ 'Job Terminated',
+                                    WHYPTLWK == 60 ~ 'Could Only Find PT',
+                                    WHYPTLWK == 101 ~ 'Health Limitation',
+                                    WHYPTLWK == 121 ~ 'Childcare Problem',
+                                    WHYPTLWK == 122 ~ 'Other Personal Obligations')) %>% 
+  select(-WHYPTLWK, -OCC) %>% 
+  filter(Employed != 'Others') %>% 
+  filter(!is.na(WTFINL))
+df$Employed <- as.numeric(df$Employed)
+  
+vtable(df)
+```
+
+
+\
+
+
+## How has retail fared relative to other industries?
+
+\
+
+### Data Exploration
+
+\
+
+#### Overall employment figures by industry, year over year
+
+\
+
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+# Explore number of people employed by industry
+jobs_industry <- df %>% 
+  group_by(Industry, YEAR, Employed) %>% 
+  count()
+# Convert to factor
+jobs_industry$YEAR <- as.numeric(jobs_industry$YEAR)
+jobs_industry$Industry <- as.factor(jobs_industry$Industry)
+jobs_industry$Employed <- factor(jobs_industry$Employed)
+jobs_industry$Employed <- factor(jobs_industry$Employed, levels = c("1", "0"), 
+                  labels = c("Yes", "No"))
+# Plot jobs by industry
+p1 <- ggplot(data = jobs_industry)+
+  aes(x = YEAR)+
+  aes(y = n) +
+  aes(group = Employed)+
+  facet_wrap(~ Industry)+
+  geom_line(aes(linetype = Employed, color = Employed)) +
+  geom_point(aes(color = Employed)) +
+  scale_x_continuous(breaks = c(2019, 2020))+
+  scale_y_continuous(labels = scales::comma ) +
+  scale_color_manual(values=c("#6497b1", "#011f4b")) +
+  theme_clean() +
+  theme(legend.key=element_blank())+
+  labs(title = "Retail and Manufacturing are similarly represented in the data and show similar overall \njob number trends", 
+       subtitle = "Arts, Leisure and Hosptility lost the most  total jobs due to COVID19", 
+       x = "Year", y = "Total Employed", 
+       tag = , caption = "Source: IPUMS CPS Monthly Data")
+p1
+  
+```
+
+\
+
+- Overall job numbers show a decrease from 2019 to 2020 for all industries. 
+
+- `Manufacturing` and `Retail` are similarly represented in the data and show similar trends. `Arts, Leisure and Hospitality` shows the most dramatic drop in employment numbers
+
+- Albeit less represented in the total sample, the `Information` industry appears to be the less impacted in terms of overall jobs, ear over year
+
+\
+
+
+#### Unemployment figures by industry
+
+
+\
+
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Filter years
+df_2019 <- df %>% 
+  filter(YEAR == 2019)
+df_2020 <- df %>% 
+  filter(YEAR == 2020) 
+df_2020_COVID <- df %>% 
+  filter(YEAR == 2020 & (!MONTH %in% c(1, 2, 3)))
+## Unemployment Rate by Industries
+unemp_ind_2020 <- df_2020 %>% 
+  group_by(Industry, MONTH, Gender, Race, Education) %>% 
+  summarize(AvgUnempRate = 1 - weighted.mean(Employed, w = WTFINL)) %>% 
+  mutate(Diff = AvgUnempRate - lag(AvgUnempRate))
+p2 <- ggplot(data = unemp_ind_2020, aes(x = MONTH, y = AvgUnempRate, color = Industry, shape = Industry)) +
+  #geom_point() +
+  geom_smooth(method = 'loess', se = FALSE) +
+  xlim('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec') +
+  scale_y_continuous(labels = scales::percent) +
+  scale_color_manual(values=c("darkgray", "#6497b1", "#005b96", "#03396c", "#011f4b"))+
+  theme_clean() +
+ geom_vline(aes(xintercept = 4 ), linetype = 'dashed', color = 'lightgrey') +
+  annotate(geom = 'text', x = "Apr", y = .03, label = 'COVID Shutdown', vjust= .5, hjust = 1, fill = 'white', size = 7/.pt, color = "gray29" ) +
+  geom_vline(aes(xintercept = 7 ), linetype = 'dashed', color = 'lightgrey') +
+  annotate(geom = 'text', x = "Jul", y = .03, label = 'Reopening Paused', vjust= .5, hjust = -.03, fill = 'white', size = 7/.pt, color = "gray29") +
+  geom_vline(aes(xintercept = 5 ), linetype = 'dashed', color = 'lightblue3') +
+  annotate(geom = 'text', x = "May", y = .06, label = 'Partial Reopening', vjust= .5, hjust = -.03, fill = 'white', size = 7/.pt, color = "gray29") +
+  labs(title = "Unemployment rates rose dramatically at the onset of the COVID-19 Pandemic", 
+       subtitle = "Pausing the reopening of economy kept retail from improving more quickly", 
+       x = "Month", y = "Avg Unemployment Rate", 
+       tag = , caption = "Source: IPUMS CPS Monthly Data")
+p2
+         
+```
+
+\
+
+
+- `Arts, Leisure and Hospitality` is the only industry more affected than `Retail` in terms of unemployment rates. 
+
+- The partial reopening helped all industries recover from their April unemployment highs, with the pause on the reopening stalling each industry's recovery. When compared to `Retail`, `Manufacturing` has a lower unemployment peak and less of a sustained, higher unemployment rate 
+
+- The `Information` industry drop in unemployment rate really took off in July, outpacing `Retail`recovery by November. 
+
+- In spite of the traditional peak season for the `Retail` industry, unemployment trend does not significantly improve in terms of unemployment rate. 
+
+\
+
+
+#### Unable to work due to COVID19
+
+\
+
+
+```{r, echo = FALSE, message=FALSE}
+df_2020_UnableToWork <- df_2020 %>% 
+  filter(COVIDUnableToWork != 'NIU') %>% 
+  mutate(UnableToWorkCOVID = ifelse(COVIDUnableToWork == 'No', 0, 1)) %>% 
+  select(-COVIDUnableToWork)
+## COVIDUnableToWork Breakdown by Employed
+UnableToWorkInd_2020 <- df_2020_UnableToWork %>% 
+  group_by(Industry, Employed) %>% 
+  summarize(AvgUnableToWork = 1 - weighted.mean(UnableToWorkCOVID, w = WTFINL)) %>% 
+  mutate(Employed = ifelse(Employed == 0, 'No', 'Yes'))
+UnableToWorkInd_2020$Employed <- factor(UnableToWorkInd_2020$Employed)
+# Factor industry
+UnableToWorkInd_2020$Industry <- factor(UnableToWorkInd_2020$Industry, levels =c("Arts, Leisure and Hospitality",  "Information", "Manufacturing", "Retail"  ))
+# Plot 
+p9 <- ggplot(data = UnableToWorkInd_2020, aes(x = Employed, y = AvgUnableToWork, fill = Industry)) +
+  geom_point(color="#011f4b", size=2, alpha=0.6)+
+  geom_segment(aes(x=Employed, xend=Employed, y=0, yend=AvgUnableToWork), color =  "#03396c") +
+  #geom_bar(stat = 'identity', position = position_dodge()) +
+  scale_y_continuous(labels = scales::percent) +
+  ylab('Average Rate of Reported Not Able To Work Due to COVID') +
+  scale_fill_manual(values=c("#b3cde0", "#6497b1", "#005b96", "#03396c", "#011f4b"))+
+  theme(axis.text.x = element_text(angle = 90)) +
+  coord_flip() +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  theme(axis.text.x = element_text(angle = 0)) +
+  theme(legend.key=element_blank())+
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1L)) +
+  facet_wrap(~ Industry)+
+  theme_clean()+
+  theme(legend.position="none") +
+  labs(title = "Manufacturing reported the highest percentage of being unable to work due to COVID-19, \nfollowed by Retail ", 
+       subtitle = "", 
+       x = "Month", y = "% Reporting Unable to Work due to COVID-19", 
+       tag = , caption = "Source: IPUMS CPS Monthly Data") 
+df_2020_Telework <- df_2020 %>% 
+  filter(COVIDTelework != 'NIU') %>% 
+  mutate(TeleworkCOVID = ifelse(COVIDTelework == 'No', 0, 1)) %>% 
+  select(-COVIDUnableToWork)
+## COVIDTelework Breakdown by Employed
+TeleworkInd_2020 <- df_2020_Telework %>% 
+  group_by(Industry, Employed) %>% 
+  summarize(AvgTelework = 1 - weighted.mean(TeleworkCOVID, w = WTFINL)) %>% 
+  mutate(Employed = ifelse(Employed == 0, 'No', 'Yes'))
+# Factor industry
+TeleworkInd_2020$Industry <- factor(TeleworkInd_2020$Industry, levels =c("Arts, Leisure and Hospitality",  "Information", "Manufacturing", "Retail"  ))
+p10 <- ggplot(data = TeleworkInd_2020, aes(x = Employed, y = AvgTelework, fill = Industry)) +
+  geom_point(color="#011f4b", size=2, alpha=0.6)+
+  geom_segment(aes(x=Employed, xend=Employed, y=0, yend=AvgTelework ), color =  "#03396c") +
+  #geom_bar(stat = 'identity', position = position_dodge()) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_manual(values=c("#b3cde0", "#6497b1", "#005b96", "#03396c", "#011f4b"))+
+  theme(axis.text.x = element_text(angle = 90)) +
+  coord_flip() +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  theme(axis.text.x = element_text(angle = 0)) +
+  theme(legend.key=element_blank())+
+  facet_wrap(~ Industry) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1L)) +
+  theme_clean() +
+  theme(legend.position="none") +
+  labs(title = "Persons still employed in the Retail and Arts, Leisure and Hospitality industries \nreport the highest percentages of being able to telework ", 
+       subtitle = "", 
+       x = "Employed", y = "% Reporting Able to Telework", 
+       tag = , caption = "Source: IPUMS CPS Monthly Data") 
+# Telework
+df_2020_Telework <- df_2020 %>% 
+  filter(COVIDTelework != 'NIU') %>% 
+  mutate(TeleworkCOVID = ifelse(COVIDTelework == 'No', 0, 1)) %>% 
+  select(-COVIDUnableToWork)
+## COVIDTelework Breakdown by Employed
+TeleworkInd_2020 <- df_2020_Telework %>% 
+  group_by(Industry, Employed) %>% 
+  summarize(AvgTelework = 1 - weighted.mean(TeleworkCOVID, w = WTFINL)) %>% 
+  mutate(Employed = ifelse(Employed == 0, 'No', 'Yes'))
+# Factor telework
+TeleworkInd_2020$Industry <- factor(TeleworkInd_2020$Industry, levels =c("Arts, Leisure and Hospitality",  "Information", "Manufacturing", "Retail"  ))
+p10 <- ggplot(data = TeleworkInd_2020, aes(x = Employed, y = AvgTelework, fill = Industry)) +
+  geom_point(color="#011f4b", size=2, alpha=0.6)+
+  geom_segment(aes(x=Employed, xend=Employed, y=0, yend=AvgTelework ), color =  "#03396c") +
+  #geom_bar(stat = 'identity', position = position_dodge()) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_manual(values=c("#b3cde0", "#6497b1", "#005b96", "#03396c", "#011f4b"))+
+  theme(axis.text.x = element_text(angle = 90)) +
+  coord_flip() +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  theme(axis.text.x = element_text(angle = 0)) +
+  theme(legend.key=element_blank())+
+  facet_wrap(~ Industry) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1L)) +
+  theme_clean() +
+  theme(legend.position="none") +
+  labs(title = "Persons still employed in the Retail and Arts, Leisure and Hospitality industries \nreport the highest percentages of being able to telework ", 
+       subtitle = "", 
+       x = "Employed", y = "% Reporting Able to Telework", 
+       tag = , caption = "Source: IPUMS CPS Monthly Data") 
+```
+
+```{r, echo=FALSE}
+# Print plots
+p9
+```
+
+
+
+
+\
+
+- `Retail` reported the highest percentage of being unable to work due to COVID-19 .
+
+- While `Arts, Leisure and Hospitality` continues to be the most affected industry among the four looked at, the percentage of persons responding 'no' to being unable to work due to the pandemic was lowest in the  `Information` industry. 
+
+\
+
+
+```{r, echo=FALSE}
+# Print plots
+p10
+```
+
+\
+
+
+- Persons still employed in the `Retail` and `Arts,Leisure and Hospitality` industries report the highest percentages of being able to telework.
+
+- By comparison, those still employed in `Information`, a higher sub-group than other industries, report the lowest percentage of being able to telework.
+
+
+\
+
+**Summary of Exploratory Findings**
+
+\
+
+In looking at the data, overall job numbers show a decrease from 2019 to 2020 for all industries during 2020 due to the shutdowns caused by the COVID-19 pandemic. Manufacturing and Retail are similarly represented in the data and show similar trends. Three inflection points present themselves in the data:
+
+1)	The States shutting down in March due to COVID-19.
+2)	The partial reopening that some States undertook in May.
+3)	The pause on reopening that occurred in July.
+
+Since the staggered nationwide shutdowns began in March, we used data from April- December 2020 to get a more accurate effect on industry employment rates. The results show that Arts, Leisure and Hospitality is the only industry more affected than Retail in terms of unemployment rates during the pandemic.
+
+The partial reopening helped industries recover from their April unemployment highs but the July pause in reopening stalled recovery for all analyzed industries. When compared to Retail,  Manufacturing has a lower unemployment peak and a less prolonged elevation in unemployment rates .The Information industry's improvement in unemployment rates gained momentum in July, outpacing Retail’s recovery by November 2020.
+
+When looking at those who were unable to work because their employer closed or lost business due to the coronavirus pandemic, persons employed in `Retail` and `Manufacturing` occupations were among the most likely to have been unable to work due to the pandemic during the period of April-December 2020. 
+
+\
+
+### Research Question: *How has retail fared relative to other industries?*
+
+\
+
+
+- Based on the findings in the exploratory analysis, we will be looking at the effect of industry type on the probability of being employed. Additionally, we will be looking at what effect resulted on the probability of being employed when we interact both `Month` and `Industry` in Retail and the other industries. We will also measure the effect `COVIDUnableToWork` and `CovidTelework` had on the same. We will be confirming if second to Arts, Leisure and Hospitality, Retail was the second most affected industry by COVID-19. Additionally, due to the seasonal nature of `Retail` we look to confirm our findings that `Months` played a role in the probability of being employed. 
+
+
+\
+
+
+- As a baseline, we run a model looking solely at the effect the type of industry has on the probability being employed.
+
+\
+
+$$ Employed_i= \beta_0 + \beta_1Industry_i    $$
+\
+
+- Our second model looks at the effect of month on the industries, particularly the months associated with the initial COVID-19 shutdown (April), the second shutdown (July), and the peak `Retail` season
+of November and December.
+
+\
+
+$$ Employed_i= \beta_0 + \beta_1Industry_i + \beta_2Month_i\times Industry_i   $$
+\
+
+- The third model measures the effect of the interaction between `Industry` and `COVIDUnableToWork` and its effect on the probability of being employed. 
+
+\
+
+$$ Employed_i= \beta_0 + \beta_1Industry_i + \beta_2COVIDUnableToWork_i\times Industry_i   $$
+
+\
+
+
+
+
+
+
+
+```{r, echo=FALSE, include=FALSE}
+# Base model
+Model_1 <- lm_robust(Employed ~ Industry , data = df_2020, weights = WTFINL)
+# Perform hypothesis test that all coefficients are equal to 0
+linearHypothesis(Model_1, matchCoefs(Model_1, "Industry"))
+# Factor Month
+df_2020$MONTH = factor(df_2020$MONTH)
+# Industry * Month
+Model_2 <- lm_robust(Employed ~ Industry + Industry*MONTH , data = df_2020, weights = WTFINL)
+# Perform hypothesis test that all coefficients are equal to 0
+linearHypothesis(Model_2, matchCoefs(Model_2, "Industry"))
+```
+
+
+
+\
+
+
+\
+
+```{r, echo=FALSE, include=FALSE}
+## COVID MODELS
+# Model with interaction Industry * COVIDUNABLE TO WORK
+Model_3 <- lm_robust(Employed ~ Industry + Industry*COVIDUnableToWork, data = df_2020_COVID, weights = WTFINL)
+# Perform hypothesis test that all coefficients are equal to 0
+linearHypothesis(Model_3, matchCoefs(Model_3, "Industry"))
+# Factor Month
+df_2020_Telework$COVIDTelework = factor(df_2020_Telework$COVIDTelework)
+```
+
+\
+
+
+##### Model Results:  Industry, Industry:Month, Industry:COVIDUnableToWork
+
+
+\
+
+
+```{r, echo=FALSE}
+# Compare Models 1, 2
+export_summs(Model_1, Model_2, Model_3,
+             model.names = c("Industry", "Industry:Month", "Industry:COVIDUnableToWork"),
+             coefs = c("Information" = "IndustryInformation",
+                       "Manufacturing" = "IndustryManufacturing",
+                       "Retail" = "IndustryRetail",
+                       "April" = "MONTH4",
+                       "July" = "MONTH7",
+                       "November" = "MONTH11",
+                       "December" = "MONTH12",
+                       "Information:April" = "IndustryInformation:MONTH4",
+                       "Manufacturing:April" = "IndustryManufacturing:MONTH4",
+                       "Retail:April" = "IndustryRetail:MONTH4",
+                       "Information:July" = "IndustryInformation:MONTH7",
+                       "Manufacturing:July" = "IndustryManufacturing:MONTH7",
+                       "Retail:July" = "IndustryRetail:MONTH7",
+                       "Information:November" = "IndustryInformation:MONTH11",
+                       "Manufacturing:November" = "IndustryManufacturing:MONTH11",
+                       "Retail:November" = "IndustryRetail:MONTH11",
+                       "Information:December" = "IndustryInformation:MONTH12",
+                       "Manufacturing:December" = "IndustryManufacturing:MONTH12",
+                       "Retail:December" = "IndustryRetail:MONTH12",
+                       "Retail:COVID-AbleToWork" = "IndustryRetail:COVIDUnableToWorkYes",
+                       "Manufacturing:COVID-AbleToWork" = "IndustryManufacturing:COVIDUnableToWorkYes",
+                       "Information:COVID-AbleToWork" = "IndustryInformation:COVIDUnableToWorkYes"),
+                scale = TRUE, robust = TRUE)
+```
+\
+
+**Key Findings**
+
+\
+
+$$ Employed_i= \beta_0 + \beta_1Industry_i $$
+
+\
+
+$$ Employed_i= \beta_0 + \beta_1Industry_i + \beta_2Month_i\times Industry_i   $$
+
+\
+
+$$ Employed_i= \beta_0 + \beta_1Industry_i + \beta_2COVIDUnableToWork_i\times Industry_i   $$
+
+\
+
+
+- **Industry**
+
+  We found the following to be statistically significant at the 95% confidence level:
+
+  - With everything else held constant, there is a 10 percentage point higher probability of being employed in the 'Retail' industry as opposed to the reference industry, `Arts, Leisure and Entertainment`.
+
+  - With everything else held constant, there is a 12 and 11 percentage point higher probability of being employed (respectively) in the `Information` and `Manufacturing` industries as opposed to the reference industry, `Arts, Leisure and Entertainment.`
+
+- **Industry:Month**
+
+  We found the following to be statistically significant at the 95% confidence level:
+
+  - With everything else held constant, there is a 32 percentage point lower probability of being employed in the month of April 2020 as opposed to the reference month of January 2020, within the reference industry, `Arts, Leisure and Entertainment.`
+
+  - With everything else held constant, there is a 18 percentage point lower probability of being employed in the month of July 2020 as opposed to the reference month of January 2020, within the reference industry, `Arts, Leisure and Entertainment.`
+
+  - With everything else held constant, there is a 9 percentage point lower probability of being employed in the month of November 2020 as opposed to the reference month of January 2020, within the reference industry, `Arts, Leisure and Entertainment.`
+
+  - With everything else held constant, there is a 10 percentage point lower probability of being employed in the month of December 2020 as opposed to the reference month of January 2020, within the reference industry, `Arts, Leisure and Entertainment.`
+
+  - With everything else held constant, there is a 19 percentage point higher probability of being employed in the month of April 2020 for the `Retail` industry as opposed to the month of January 2020 for the `Arts, Leisure and Entertainment` industry.
+  
+  - With everything else held constant, there is a 22 percentage point higher probability of being employed in the month of April 2020 for either the `Information` or `Manufacturing` industry as opposed to the month of January 2020 for the `Arts, Leisure and Entertainment` industry.
+
+  - With everything else held constant, there is a 13 percentage point higher probability of being employed in the month of July 2020 for either the `Retail` or `Manufacturing` industry as opposed to the month of January 2020 for the `Arts, Leisure and Entertainment` industry.
+
+  - With everything else held constant, there is a 8 percentage point higher probability of being employed in the month of July 2020 for the `Information` industry as opposed to the month of January 2020 for the `Arts, Leisure and Entertainment` industry.
+
+  - With everything else held constant, there is a 8 percentage point higher probability of being employed in the month of November 2020 for the `Retail` industry as opposed to the month of January 2020 for the `Arts, Leisure and Entertainment` industry.
+
+  - With everything else held constant, there is a 3 percentage point higher probability of being employed in the month of November 2020 for the `Information` industry as opposed to the month of January 2020 for the `Arts, Leisure and Entertainment` industry.
+
+  - With everything else held constant, there is a 7 percentage point higher probability of being employed in the month of November 2020 for the `Manufacturing` industry as opposed to the month of January 2020 for the `Arts, Leisure and Entertainment` industry.
+
+  - With everything else held constant, there is a 9 percentage point higher probability of being employed in the month of December 2020 for either the `Retail` or `Manufacturing` industry as opposed to the month of January 2020 for the `Arts, Leisure and Entertainment` industry.
+
+  - With everything else held constant, there is a 6 percentage point higher probability of being employed in the month of December 2020 for the `Information` industry as opposed to the month of January 2020 for the `Arts, Leisure and Entertainment` industry.
+  
+- **Industry:Covid-AbleToWork**
+
+  We found the following to be statistically significant at the 95% confidence level:
+
+  - With everything else held constant, people being able to work during the COVID-19 pandemic in the `Retail` industry have a 6 percentage point higher probability of staying employed as opposed to people who are unable to work during the pandemic in the reference industry,  `Arts, Leisure and Entertainment`.
+  
+  - With everything else held constant, people being able to work during the COVID-19 pandemic in the `Manufacturing` industry have a 4 percentage point higher probability of staying employed as opposed to people who are unable to work during the pandemic in the reference industry,  `Arts, Leisure and Entertainment`.
+  
+  - With everything else held constant, people being able to work during the COVID-19 pandemic in the `Information` industry have a 1 percentage points higher probability of staying employed as opposed to people who are unable to work during the pandemic in the reference industry,  `Arts, Leisure and Entertainment`.
+
+
+
+\
+
+**Summary of Findings**
+
+While other variables held constant, when we compare Retail to Arts, Leisure and Entertainment, there is a 10 percentage points higher probability of being employed in 2020, while we are in the COVID-19 pandemic. Compared to Retail, being in either the Manufacturing or Information industries has a higher probability of being employed by 2 and 1 percentage points, respectively. 
+
+Our exploratory analysis revealed that April and July were two critical months in 2020 that pointed at increased unemployment rates due to either States shutting down or pausing their reopening. The analysis confirms this. The probability of being employed decreases by 32 percentage points in April and by 18 percentage points in July, within the reference industry, Arts, Leisure and Entertainment. In April alone, when comparing to Retail, there is a 3 percentage points higher probability of being employed in both the Manufacturing and Information industries.
+
+Interestingly, when States paused reopening plans in July, being employed in Retail results in a 5-percentage point higher probability of being employed when compared to the Information industry and a 13-percentage point higher probability when compared to Arts, Leisure and Hospitality. 
+
+As November and December are considered peak season for Retail, we compared its performance to the other industries for those months. When compared to the Information industry, Retail enjoys a 5-percentage point advantage in the probability of being employed in November and a 3-percentage point advantage in December. When compared to Arts, Leisure and Hospitality, the same December probability advantage for Retail increases to 9 percentage points. 
+
+Finally, looking at the special COVID-19 question of  "At any time in the last 4 weeks, were you unable to work because your employer closed or lost business due to the coronavirus pandemic?" reveals that answering "Yes" to this question and being in the Retail industry has a 5 percentage points higher probability of being employed when compared to the Information industry and a 6 percentage points advantage over the probability of being employed in the Arts, Leisure and Hospitality industry. 
+
+
+\
+
+## Who has money to spend?  
+
+\
+
+### Data Exploration  
+ 
+\
+
+#### Overview of employment by Race, Gender, and Eduation from January 2019 to December 2020  
+
+\
+
+##### By Race  
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+# Where are the different race working?
+demographics <- df %>% 
+  group_by(Race = as_factor(Race),
+           Industry = as_factor(Industry)) %>% 
+  summarize(n = sum(WTFINL)) %>% 
+  mutate(Percent = n/sum(n))
+# demographics
+
+# Plot graph
+plot1 <- ggplot(data = demographics, aes(x = Race, reorder(Race), y = Percent, fill = Industry)) +
+  geom_bar(position="stack", stat="identity")+
+  scale_y_continuous(labels = scales::percent) +
+  ylab('Avg Employment Rate') +
+  xlab('Race') +
+  scale_fill_manual(values=c("#b3cde0", "#6497b1", "#005b96", "#03396c", "#011f4b"))+
+  theme(axis.text.x = element_text(angle = 90)) +
+  coord_flip() +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  theme(axis.text.x = element_text(angle = 0)) +
+  theme(legend.key=element_blank())+
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1L)) +
+  theme_clean() +
+  labs(title = "Industries among different races (2019-2020)", 
+       subtitle = "Within each race, over 59% are employed by the Retail and Arts, Leisure and Hospitality industries", 
+       x = "Race", y = "Avg Percent of Total Employment", 
+       tag = , caption = "")
+
+```
+
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+# Filter years
+df_2019 <- df %>% 
+  filter(YEAR == 2019)
+
+df_2020 <- df %>% 
+  filter(YEAR == 2020)
+
+# df_2020_COVID <- df %>% 
+#   filter(YEAR == 2020 & (!MONTH %in% c(1, 2, 3)))
+
+# 2020 unemploymnet among the different races
+unemp_ind_2020 <- df_2020 %>% 
+  group_by(MONTH, Race) %>% 
+  summarize(AvgUnempRate = 1 - weighted.mean(Employed, w = WTFINL)) %>% 
+  mutate(Diff = AvgUnempRate - lag(AvgUnempRate))
+
+# Plot graph
+plot2 <- ggplot(data = unemp_ind_2020, aes(x = MONTH, y = AvgUnempRate, color = Race)) +
+  #geom_point() +
+  geom_smooth(method = 'loess', se = FALSE) +
+  xlim('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec') +
+  scale_y_continuous(labels = scales::percent) +
+  scale_color_manual(values=c("#b3cde0","darkgray", "#6497b1", "#005b96", "#03396c" ))+
+  theme_clean() +
+  geom_vline(aes(xintercept = 4 ), linetype = 'dashed', color = 'lightgrey') +
+  annotate(geom = 'text', x = "Apr", y = .03, label = 'COVID Shutdown', vjust= .5, hjust = 1, fill = 'white', size = 7/.pt, color = "gray29" ) +
+  geom_vline(aes(xintercept = 7 ), linetype = 'dashed', color = 'lightgrey') +
+  annotate(geom = 'text', x = "Jul", y = .03, label = 'Reopening Paused', vjust= .5, hjust = -.03, fill = 'white', size = 7/.pt, color = "gray29") +
+  geom_vline(aes(xintercept = 5 ), linetype = 'dashed', color = 'lightblue3') +
+  annotate(geom = 'text', x = "May", y = .06, label = 'Partial Reopening', vjust= .5, hjust = -.03, fill = 'white', size = 7/.pt, color = "gray29") +
+  labs(title = "Black Americans experienced a larger increase in unemployment during \nCOVID-19 shutdown", 
+       subtitle = "Asian and White Americans had the most steady recovery in unemployment among all groups", 
+       x = "Month", y = "Avg Unemployment Rate", 
+       tag = , caption = "")
+
+
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#Show plots
+plot1
+plot2
+```
+
+
+\
+
+- From 2019 to 2020, the `Retail` and `Arts, Leisure and Hospitality` industries (combined) employed 72.32% of Mixed Race Americans, 68.40% of Latino Americans, and 67.10% of Black Americans.
+
+- Black Americans experienced the most significant increase in unemployment during the COVID-19 shutdown. .  The spike in unemployment rates for White Americans was lower compared to other races.
+
+- Asian and White Americans had the most steady recovery in unemployment among all groups, but unemployment recovery is slower for Black Americans.  
+
+\
+
+
+**By Gender**
+
+\
+
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+
+# Women's ageGroup & Head of household
+demographics <- df %>% 
+  filter(PERNUM == 1,
+         Gender == "Female") %>% 
+  group_by(AgeGroup = as_factor(AgeGroup)) %>% 
+  summarize(n = sum(HWTFINL)) %>% 
+  mutate(PercentFemaleHeadHousehold = n/sum(n)) 
+# demographics
+
+## Industry - Gender
+unemp_ind_2020 <- df_2020 %>% 
+  group_by(Industry, Gender) %>% 
+  summarize(AvgUnempRate = 1 - weighted.mean(Employed, w = WTFINL)) %>% 
+  mutate(Diff = AvgUnempRate - lag(AvgUnempRate))
+# unemp_ind_2020
+
+unemp_ind_2020 <- df_2020 %>% 
+  group_by(Industry, MONTH, Gender) %>% 
+  summarize(AvgUnempRate = 1 - weighted.mean(Employed, w = WTFINL)) %>% 
+  mutate(Diff = AvgUnempRate - lag(AvgUnempRate))
+
+# Plot graph
+plot3 <- ggplot(data = unemp_ind_2020, aes(x = MONTH, y = AvgUnempRate, color = Gender)) +
+  #geom_point() +
+  geom_smooth(method = 'loess', se = FALSE) +
+  xlim('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec') +
+  scale_y_continuous(labels = scales::percent) +
+  scale_color_manual(values=c("#b3cde0", "#6497b1", "#005b96", "#03396c", "#011f4b"))+
+  theme_clean() +
+   geom_vline(aes(xintercept = 4 ), linetype = 'dashed', color = 'lightgrey') +
+  annotate(geom = 'text', x = "Apr", y = .03, label = 'COVID Shutdown', vjust= .5, hjust = 1, fill = 'white', size = 7/.pt, color = "gray29" ) +
+  geom_vline(aes(xintercept = 7 ), linetype = 'dashed', color = 'lightgrey') +
+  annotate(geom = 'text', x = "Jul", y = .03, label = 'Reopening Paused', vjust= .5, hjust = -.03, fill = 'white', size = 7/.pt, color = "gray29") +
+  geom_vline(aes(xintercept = 5 ), linetype = 'dashed', color = 'lightblue3') +
+  annotate(geom = 'text', x = "May", y = .06, label = 'Partial Reopening', vjust= .5, hjust = -.03, fill = 'white', size = 7/.pt, color = "gray29") +
+  labs(title = "Women experienced a higher peak in unemployment during COVID-19 shutdown", 
+       subtitle = "Unemployment rates are more sustained among women during Jun-Dec", 
+       x = "Month", y = "Avg Unemployment Rate", 
+       tag = , caption = "")
+
+
+
+# Which indsutry has the highest female employment?
+demographics <- df_2020 %>% 
+  filter(Gender=="Female") %>% 
+  group_by(Industries = as_factor(Industry)) %>% 
+  summarize(n = sum(WTFINL)) %>% 
+  mutate(PercentFemale = n/sum(n)) 
+# demographics
+
+
+# Which indsutry has the highest men employment?
+demographics2 <- df_2020 %>% 
+  filter(Gender=="Male") %>% 
+  group_by(Industries = as_factor(Industry)) %>% 
+  summarize(n = sum(WTFINL)) %>% 
+  mutate(PercentMale = n/sum(n)) 
+# demographics2
+
+# what does Female  & unemployment proportion look like in each industry? 
+demographics <- df_2020 %>% 
+  group_by(Industries = as_factor(Industry),
+           Gender = as_factor(Gender)) %>% 
+  summarize(n = sum(WTFINL)) %>% 
+  mutate(percent = n/sum(n))
+# demographics
+
+
+## Industry - Gender 
+unemp_ind_2020 <- df_2020 %>% 
+  group_by(Industry, Gender) %>% 
+  summarize(AvgUnempRate = 1 - weighted.mean(Employed, w = WTFINL)) %>% 
+  mutate(Diff = AvgUnempRate - lag(AvgUnempRate))
+# unemp_ind_2020
+
+# Factor Industry
+unemp_ind_2020$Industry <- factor(unemp_ind_2020$Industry, levels =c("Manufacturing", "Information", "Retail",  "Arts, Leisure and Hospitality"))
+
+# Plot graph
+plot4 <- ggplot(data = unemp_ind_2020, aes(x = Gender, reorder(Gender), y = AvgUnempRate, fill = Industry)) +
+  geom_bar(stat = 'identity', position = position_dodge()) +
+  scale_y_continuous(labels = scales::percent) +
+  ylab('Average Unemployment Rate') +
+  xlab('Gender') +
+  scale_fill_manual(values=c("#b3cde0", "#6497b1", "#005b96", "#03396c", "#011f4b"))+
+  #scale_fill_manual(values=c( "#03396c", "#011f4b"))+
+  theme(axis.text.x = element_text(angle = 90)) +
+  coord_flip() +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  theme(axis.text.x = element_text(angle = 0)) +
+  theme(legend.key=element_blank())+
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1L)) +
+  theme_clean() +
+  labs(title = "Arts, Leisure and Hospitality experienced the highest unemployment for both genders", 
+       subtitle = "More men worked in the Retail industry than women,, but unemployment rates were higher for women", 
+       x = "Gender", y = "Avg Unemployment Rate (2020)", 
+       tag = , caption = "") 
+
+
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#Show plots
+plot3
+plot4 
+```
+
+
+\
+
+- 72.42% of women worked in `Retail` or `Arts, Leisure and Hospitality`   
+
+- Compared to men, women experienced a higher spike in unemployment during the COVID-19 shutdown.    
+
+- Unemployment rates remained higher for women even after the partial re-opening in May.  
+
+- Women experienced higher unemployment across all industries, with the exception of `Manufacturing`. `Retail` was the second most affected industry, regardless of gender.      
+
+- Retail employed 4.4% more men than women, but unemployment rates were higher for women.      
+
+\
+
+
+**By Education**
+
+\
+
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+
+# Education by Gender
+
+# Male Education
+male_edu_2020 <- df_2020 %>% 
+  filter(Gender == "Male",) %>%
+  group_by(Education = as_factor(Education)) %>%
+  summarize(n = sum(WTFINL)) %>%
+  mutate(PercentMale = n/sum(n))
+# male_edu_2020
+
+
+# Female Education
+female_edu_2020 <- df_2020 %>% 
+  filter(Gender == "Female",) %>% 
+  group_by(Education = as_factor(Education)) %>% 
+  summarize(n = sum(WTFINL)) %>% 
+  mutate(PercentFemale = n/sum(n)) 
+# female_edu_2020
+
+
+female_edu_2020$Education <- factor(female_edu_2020$Education, levels =c("GraduateDegreeOrHigher", "NoHighschool", "BachelorDegree", "SomeCollegeAssociateDegree","HighschoolNoCollege" ))
+
+plot5 <- ggplot(data = female_edu_2020, aes(x = Education, y = PercentFemale, fill = Education)) +
+  geom_bar(stat = 'identity', position = position_dodge()) +
+  scale_y_continuous(labels = scales::percent) +
+  ylab('PercentFemale') +
+  xlab('Education') +
+  scale_fill_manual(values=c("#b3cde0", "#6497b1", "#005b96", "#03396c", "#011f4b"))+
+  theme(axis.text.x = element_text(angle = 90)) +
+  coord_flip() +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  theme(axis.text.x = element_text(angle = 0)) +
+  theme(legend.key=element_blank())+
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1L)) +
+  theme_clean() +
+  labs(title = "Women's Education Level (2020)", 
+       subtitle = "Over 70% of women have less than an Associate Degree ", 
+       x = "Education", y = "Percent Women", 
+       tag = , caption = "")
+
+
+
+# Unemployemnt by Edu level
+women_unemp_2020 <- df_2020 %>% 
+  filter(Gender == "Female") %>% 
+  group_by(MONTH, Education = as_factor(Education)) %>% 
+  summarize(Female_AvgUnempRate = 1 - (weighted.mean(Employed, w = WTFINL)),
+            Female_AvgEmpRate = weighted.mean(Employed, w = WTFINL))
+
+plot6 <- ggplot(data = women_unemp_2020, aes(x = MONTH, y = Female_AvgUnempRate, color = Education)) +
+  #geom_point() +
+  geom_smooth(method = 'loess', se = FALSE) +
+  xlim('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec') +
+  scale_y_continuous(labels = scales::percent) +
+  scale_color_manual(values=c("#b3cde0", "#6497b1", "#005b96", "darkgrey", "#011f4b"))+
+  theme_clean() +
+   geom_vline(aes(xintercept = 4 ), linetype = 'dashed', color = 'lightgrey') +
+  annotate(geom = 'text', x = "Apr", y = .03, label = 'COVID Shutdown', vjust= .5, hjust = 1, fill = 'white', size = 7/.pt, color = "gray29" ) +
+  geom_vline(aes(xintercept = 7 ), linetype = 'dashed', color = 'lightgrey') +
+  annotate(geom = 'text', x = "Jul", y = .03, label = 'Reopening Paused', vjust= .5, hjust = -.03, fill = 'white', size = 7/.pt, color = "gray29") +
+  geom_vline(aes(xintercept = 5 ), linetype = 'dashed', color = 'lightblue3') +
+  annotate(geom = 'text', x = "May", y = .06, label = 'Partial Reopening', vjust= .5, hjust = -.03, fill = 'white', size = 7/.pt, color = "gray29") +
+  labs(title = "Women with lower education levels experienced a higher unemployment \nduring COVID-19 shutdown", 
+       x = "Month", y = "Avg Unemployment Rate", 
+       tag = , caption = "")
+
+
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+plot5
+plot6
+```
+
+
+\
+
+- Over 70% of women have less than an Associate Degree  
+
+- Women with lower education levels experienced a higher unemployment during COVID-19 shutdown   
+
+- 26.60% of women have graduate or higher education.  They experienced a lower peak in unemployment during the COVID-19 shutdown.   
+
+- Unemployment decline after the partial opening in May, but increased in November and December.    
+
+
+\
+
+**Key Findings**
+
+
+
+We examined employment data for 4 different industries ( Retail /  Manufacturing / Information /  and Arts, Leisure, and Hospitality)  to understand the scope of employment as it pertains to gender, age, race, and education. 
+Data from 2019 to 2020 showed:  
+
++ 7.5% average unemployment rate
++ Majority of Minority Americans worked in `Retail` or `Arts, Leisure and Hospitality`
++ 72% of Mixed-Race Americans, 68% of Latino Americans, and 67% of Black Americans
++ 72% of women worked in `Retail` or `Arts, Leisure and Hospitality` compared to 55%  of men
++ 43% of women have less than a high school education compared to 34% of men
++ Among women who are head of household 21% are between the age of 20 and 29
+
+Looking at unemployment for 2020, we found that during the COVID-19 shutdown:  
+
++ Black Americans experienced the most significant increase in unemployment
++ Unemployment was the highest for men and women  who worked in  the `Arts, Leisure and Hospitality` industry
++ Women experienced higher unemployment than men across all industries
++ Retail industry employed 4.4% more men than women, but unemployment rates were higher for women
++ Over 70% of women have less than an Associate Degree
++ Women with lower education levels experienced a higher unemployment
+
+
+
+\
+
+
+
+
+### Research Question: Who has money to spend?   
+
+*What has changed about who is working and earning money?*    
+
+
+Based on the findings in the exploratory analysis, we will examine the effect of `Gender` on the probability of being employed. Additionally, we will look at the effect of the following interactions on the probability of being employed:     
+
++ `Gender` and `Race`    
++ `Gender` and `Age`    
++ `Gender` and `Education`    
+
+
+
+\
+
+
+
+First, we run a model looking solely at the effect of  `Gender` on the probability of being employed.
+
+\
+
+$$ Employed_i= \beta_0 + \beta_1Gender_i $$
+\
+
+The second model measures the effect of the interaction between `Gender` and `Race` on the probability of being employed. 
+
+\
+$$ Employed_i= \beta_0 + \beta_1Gender_i\times Race_i$$
+
+\
+
+The third model measures the effect of the interaction between `Gender` and `Age` on the probability of being employed. 
+
+\
+
+$$ Employed_i= \beta_0 + \beta_1Gender_i\times Age_i$$
+
+\
+
+The last model measures the effect of the interaction between `Gender` and `Education`  on the probability of being employed. 
+
+\
+
+
+$$ Employed_i= \beta_0 + \beta_1Gender_i\times Education_i   $$
+\
+
+\
+
+
+#### Models  
+
+\
+
+***Model 1:*** The effect of `Gender` on the probability of being employed  
+
+$$ Employed_i= \beta_0 + \beta_1Gender_i $$
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+
+# Baseline model : Model 1: The effect of `Gender` on the probability of being employed
+
+Model_1 <- lm_robust(Employed ~ Gender, data = df_2020, weights = WTFINL)
+
+# Perform hypothesis test that all coefficients are equal to 0
+# linearHypothesis(Model_1, matchCoefs(Model_1, "Gender"))
+
+# Look at model
+# export_summs(Model_1)
+export_summs(Model_1,
+             model.names = c("Gender"),
+             coefs = c("Female" = "GenderFemale"),
+             robust = TRUE)
+
+
+
+```
+
+
++ Holding all else constant, women have a 2 percentage points less probability of being employed relative to men.  The estimate in this model is statistically significant at the 0.001 level.  
+
+\
+\
+
+
+***Model 2:*** The effect of the interaction between `Gender` and `Race` on the probability of being employed.  
+
+$$ Employed_i= \beta_0 + \beta_1Gender_i\times Race_i$$
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+# Model 2: The effect of the interaction between `Gender` and `Race` on the probability of being employed. 
+
+Model_2 <- lm_robust(Employed ~ Gender +  Race, data = df_2020, weights = WTFINL)
+Model_2a <- lm_robust(Employed ~ Gender * Race, data = df_2020, weights = WTFINL)
+
+# Perform hypothesis test that all coefficients are equal to 0
+# linearHypothesis(Model_2, matchCoefs(Model_2, "Gender"))
+# linearHypothesis(Model_2a, matchCoefs(Model_2a, "Gender"))
+# # Look at model
+export_summs(Model_2, Model_2a,
+             model.names = c("Gender,Race", "Gender:Race"),
+             coefs = c("Female" = "GenderFemale",
+                       "Black" = "RaceBlack",
+                       "Latino" = "RaceLatino",
+                       "MixedRace" = "RaceMixedRace",
+                       "White" = "RaceWhite",
+                       "Female:Black" = "GenderFemale:RaceBlack",
+                       "Female:Latino" = "GenderFemale:RaceLatino",
+                       "Female:MixedRace" = "GenderFemale:RaceMixedRace",
+                       "Female:White" = "GenderFemale:RaceWhite"),
+             scale = TRUE, robust = TRUE)
+
+
+```
+
+
++ Controlling for gender, Black Americans are 5 percentage points less likely to be employed compared to Asian Americans.  Whereas White Americans are 2% more likely to be employed relative to Asian Americans.    
+  
++ Relative to Asian American men, Black American men are 6 percentage points less likely to be employed.  
+In contrast, White American men are 2 percentage points more  likely to be employed than Asian American men.  
+ 
++ Black American women (-0.04 -0.06 +0.03 = -0.07) are 1 percentage point less likely to be employed compared to Black American men (-0.06).    
+
++ The estimates in these models are statistically significant at the 0.001 level.   
+
++ **Higher probability  of employment:**  White American men  
++ **Lower  probability  of employment:**  Black American women  
+
+\
+\
+
+
+***Model 3:*** The effect of  the interaction between `Gender` and `Age` on the probability of being employed.  
+
+$$ Employed_i= \beta_0 + \beta_1Gender_i\times Age_i$$
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+# Model 3: The effect of  the interaction between `Gender` and `Age` on the probability of being employed. 
+
+Model_3 <- lm_robust(Employed ~ Gender + AgeGroup, data = df_2020, weights = WTFINL)
+Model_3a <- lm_robust(Employed ~ Gender * AgeGroup, data = df_2020, weights = WTFINL)
+
+# Perform hypothesis test that all coefficients are equal to 0
+# linearHypothesis(Model_3, matchCoefs(Model_3, "Gender"))
+# linearHypothesis(Model_3a, matchCoefs(Model_3a, "Gender"))
+
+# Look at model
+export_summs( Model_3, Model_3a,
+             model.names = c("Gender,Age", "Gender:Age"),
+             coefs = c("Female" = "GenderFemale",
+                       "Age:30to39" = "AgeGroup30to39",
+                       "Age:40to49" = "AgeGroup40to49",
+                       "Age:50to59" = "AgeGroup50to59",
+                       "Age:over60" = "AgeGroupover60",
+                       "Age:under20" = "AgeGroupunder20",
+                       "Female:Age 30to39" = "GenderFemale:AgeGroup30to39",
+                       "Female:Age 40to49" = "GenderFemale:AgeGroup40to49",
+                       "Female:Age 50to59" = "GenderFemale:AgeGroup50to59",
+                       "Female:Age over60" = "GenderFemale:AgeGroupover60",
+                       "Female:Age under20" = "GenderFemale:AgeGroupunder20"),
+             scale = TRUE, robust = TRUE)
+
+
+```
+
+  
++ Holding gender constant, those who are 40 years old or older are 6 percentage points more likely to be employed compared to those who are 20 to 29 years old.    
+
++ Among those men and women between 20 to 29 years old, women are 1 percentage point less likely to be employed.   
++ Men between the age of 50 and 59 are 7 percentage points more likely to be employed compared to men between 20 to 29 years old.    
+
++ Women between the age of 50 and 59 are 4 percentage points more likely to be employed compared to women between 20 to 29 years old.    
+
++ The estimates in these models are statistically significant at the 0.001 level.    
+
++ **Higher probability  of employment:**  Men between the age of 50 and 59  
++ **Lower  probability  of employment:**  Women between 20 to 29 years old  
++ **Note:**  Among women who are head of household 21% are between the age of 20 and 29  
+
+
+\
+\
+
+***Model 4:*** The effect of the interaction between `Gender` and `Education`  on the probability of being employed. 
+$$ Employed_i= \beta_0 + \beta_1Gender_i\times Education_i   $$
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+# Model 4 : The effect of the interaction between `Gender` and `Education`  on the probability of being employed. 
+
+Model_4 <- lm_robust(Employed ~ Gender + Education, data = df_2020, weights = WTFINL)
+Model_4a <- lm_robust(Employed ~ Gender * Education, data = df_2020, weights = WTFINL)
+
+# Perform hypothesis test that all coefficients are equal to 0
+# linearHypothesis(Model_4, matchCoefs(Model_4, "Gender"))
+# linearHypothesis(Model_4a, matchCoefs(Model_4a, "Gender"))
+
+# # Look at model
+export_summs(Model_4, Model_4a,
+             model.names = c("Gender,Education", "Gender:Education"),
+             coefs = c("Female" = "GenderFemale",
+                       "GraduateDegreeOrHigher" = "EducationGraduateDegreeOrHigher",
+                       "HighschoolNoCollege" = "EducationHighschoolNoCollege",
+                       "NoHighschool" = "EducationNoHighschool",
+                       "SomeCollegeAssociateDegree" = "EducationSomeCollegeAssociateDegree",
+                       "Female:GraduateDegreeOrHigher" = "GenderFemale:EducationGraduateDegreeOrHigher",
+                       "Female:HighschoolNoCollege" = "GenderFemale:EducationHighschoolNoCollege",
+                       "Female:NoHighschool" = "GenderFemale:EducationNoHighschool",
+                       "Female:SomeCollegeAssociateDegree" = "GenderFemale:EducationSomeCollegeAssociateDegree"),
+             scale = TRUE, robust = TRUE)
+
+```
+
+
++ Controlling for gender, those with no high school education has a 5 percentage points less probability of being employed relative to having a Bachelor's degree.       
+
+
++ Comparing men and women with Bachelor’s  degrees, women are 3 percentage points less likely to be employed.      
+
++ Men with NO high school education are 6 percentage points less likely to be employed compared to men with Bachelor’s degrees.    
+
++ Women with NO high school education ( -0.03 -0.06 + 0.02) are 7 percentage points less likely to be employed compared to men with Bachelor’s degrees.    
+
++ Women with graduate degrees  ( -0.03 +0.02 + 0.02= 0.01) are 7 percentage points MORE (0.01 – (-0.06)) likely to be employed compared to men with NO high school education (-0.06).   
+
++ Among men and women with graduate or higher educations, men are 1 percentage point more likely to be employed.    
+
++ Comparing women with NO high school education (-0.03 - 0.06 + 0.02 = -0.07)  and women with Associates degrees 
+(-0.03 -0.03 +0.01 = -0.05 ), those with Associates degrees are 2 percentage point more likely to be employed.   
+
++ The estimates in these models are statistically significant at the 0.001 level.   
+
++ **Higher probability of employment:**  Men with Bachelor’s or higher degrees   
++ **Lower  probability of employment:**  Women with lower than Associates degrees  
+
+
+
+\
+
+\
+
+  
+**Summary of Findings**
+
+Who has money to spend?    
+
+We examined the 2019 to 2020 Current Population Survey data for 4 different industries to understand the scope of employment as it pertains to gender, age, race, and education.  Within the `Retail`,  `Manufacturing`, `Information` and `Arts, Leisure, and Hospitality` industries, we found that on average over 72% of women and over 67% of Minority Americans worked in `Retail` or `Arts, Leisure and Hospitality`.   Overall, unemployment was higher among women and Black Americans.  In addition, the `Arts, Leisure and Hospitality` industry suffered the most unemployment during the COVID-19 shutdown.       
+
+Our assumption is that those who are working during the COVID-19 pandemic have more spending power than those who are unable to work.  And individuals with a higher probability of being employed are more likely to work during the COVID-19 shutdown.    
+
+Our analysis showed that individuals with highest probability of employment are:  
+
++ White American men    
++ Men between the age of 50 and 59    
++ Those with a graduate or higher degree    
+   
+Individuals with the lowest probability of being employed are:      
+
++ Black American women  
++ Women between the age of 20 and 29  
++ Women who have lower than Associates degrees  
+
+Overall, Black American women, women with no college education, or women between the age of 20 and 29 have lower  spending power.  We also observed that among women who are head of household, 21% are between the age of 20 and 29.   Given that on average 72% of women worked in  `Retail` or `Arts, Leisure and Hospitality` they experienced the most unemployment.     
+ 
+
+\
